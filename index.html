@@ -1,0 +1,826 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Interval Timer</title>
+    <link rel="manifest" href="manifest.json">
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --glass-bg: rgba(15, 23, 42, 0.85);
+            --glass-border: rgba(255, 255, 255, 0.1);
+            --work-accent: #3b82f6;
+            --break-accent: #10b981;
+            --text-main: #f8fafc;
+            --text-dim: #94a3b8;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+
+        body, html {
+            height: 100%; width: 100%;
+            background-color: var(--bg-color); color: var(--text-main);
+            overflow: hidden; display: flex; justify-content: center; align-items: center;
+        }
+
+        #bg-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background-size: cover; background-position: center;
+            transition: background-image 0.5s ease; z-index: 0;
+        }
+
+        #app {
+            position: relative; z-index: 1; width: 100%; max-width: 900px;
+            height: 100%; max-height: 900px; padding: 16px;
+            display: flex; flex-direction: column; align-items: center;
+        }
+
+        .glass-panel {
+            background: var(--glass-bg); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--glass-border); border-radius: 20px; padding: 24px;
+            display: flex; flex-direction: column; width: 100%; height: 100%;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); overflow-y: auto;
+        }
+
+        /* Timeline Styles */
+        #timeline-wrapper {
+            position: relative; width: 100%; margin-bottom: 32px; flex-shrink: 0;
+        }
+        #timeline-container {
+            width: 100%; height: 40px; background: rgba(0,0,0,0.5); border-radius: 8px;
+            overflow: hidden; position: relative; border: 1px solid var(--glass-border);
+            box-shadow: inset 0 2px 5px rgba(0,0,0,0.5); transition: all 0.3s ease;
+        }
+        #timeline-wrapper.active-timer {
+            position: absolute; top: 0; left: 0; z-index: 100; margin-bottom: 0;
+        }
+        #timeline-wrapper.active-timer #timeline-container {
+            height: 28px; border-radius: 0; border: none; box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+        }
+        
+        #timeline-blocks { display: flex; width: 100%; height: 100%; }
+        .tl-block { height: 100%; transition: width 0.2s, background-color 0.2s; cursor: pointer; border-right: 1px solid rgba(0,0,0,0.3); }
+        .tl-block:last-child { border-right: none; }
+        
+        /* Base Colors */
+        .tl-block.work { background: var(--work-accent); }
+        .tl-block.break { background: var(--break-accent); }
+        /* Dynamic Override Colors */
+        .tl-block.unplanned-break { background: #f43f5e !important; } /* Rose */
+        .tl-block.makeup-work { background: #f59e0b !important; } /* Amber */
+        .tl-block.unplanned-work { background: #8b5cf6 !important; } /* Violet */
+        .tl-block.bonus-break { background: #0ea5e9 !important; } /* Sky */
+
+        .tl-block.selected { box-shadow: inset 0 0 0 2px #fff; filter: brightness(1.3); }
+        
+        #timeline-progress {
+            position: absolute; top: 0; left: 0; height: 100%; width: 0%;
+            background: rgba(255,255,255,0.35); border-right: 2px solid white; pointer-events: none; transition: width 0.1s linear;
+        }
+
+        #timeline-labels {
+            position: absolute; top: 100%; left: 0; width: 100%; height: 32px; pointer-events: none;
+        }
+        .tl-label {
+            position: absolute; transform: translateX(-50%); font-size: 11px; color: var(--text-dim); font-weight: 600; white-space: nowrap; transition: top 0.2s;
+        }
+        .tl-tick {
+            position: absolute; top: 0; transform: translateX(-50%); width: 2px; height: 6px; background: var(--text-dim);
+        }
+        #timeline-wrapper.active-timer #timeline-labels { top: 100%; }
+        #timeline-wrapper.active-timer .tl-label { color: rgba(255,255,255,0.9); text-shadow: 0 1px 3px rgba(0,0,0,0.8); }
+        #timeline-wrapper.active-timer .tl-tick { background: rgba(255,255,255,0.9); box-shadow: 0 1px 3px rgba(0,0,0,0.8); }
+
+        /* Builder Elements */
+        .procedural-card { background: rgba(255, 255, 255, 0.05); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+        .input-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .input-row label { font-size: 14px; }
+        .base-input { background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: white; padding: 8px; border-radius: 6px; outline: none; }
+        
+        button { border: none; cursor: pointer; border-radius: 8px; font-weight: 600; transition: all 0.2s; }
+        .btn-full { width: 100%; padding: 12px; background: var(--work-accent); color: white; margin-top: 10px; }
+        .btn-full:active { transform: scale(0.98); }
+        .danger { background: rgba(239, 68, 68, 0.2); color: #fca5a5; }
+
+        .tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+        .tab-btn { flex: 1; padding: 10px; background: rgba(0,0,0,0.2); color: var(--text-dim); font-size: 14px; }
+        .tab-btn.active { background: rgba(255,255,255,0.1); color: white; border: 1px solid var(--glass-border); }
+
+        .main-actions { display: flex; gap: 10px; margin-top: auto; }
+        .btn-start { flex: 2; padding: 16px; background: #22c55e; color: white; font-size: 18px; }
+        .btn-link { flex: 1; padding: 16px; background: rgba(255,255,255,0.1); color: white; }
+
+        /* Timer View Elements */
+        #timer-view { text-align: center; justify-content: center; display: none; flex-direction: column; align-items: center; width: 100%; height: 100%; }
+        #timer-view:not(.hidden) { display: flex; }
+        .timer-header { margin-bottom: 20px; }
+        #current-name { font-size: 64px; font-weight: 800; margin-bottom: 8px; text-shadow: 0 4px 15px rgba(0,0,0,0.8), 0 2px 5px rgba(0,0,0,0.5); letter-spacing: -1px; }
+        #current-idx { font-size: 20px; color: rgba(255, 255, 255, 0.9); text-shadow: 0 2px 8px rgba(0,0,0,0.8); font-weight: 500; }
+        #time-display { font-size: 25vw; font-variant-numeric: tabular-nums; font-weight: 800; line-height: 1; margin-bottom: 60px; letter-spacing: -4px; color: white; text-shadow: 0 8px 30px rgba(0,0,0,0.9), 0 4px 10px rgba(0,0,0,0.6); }
+        @media (min-width: 600px) { #time-display { font-size: 180px; } }
+        
+        .timer-controls { display: flex; gap: 16px; justify-content: center; margin-bottom: 40px; }
+        .btn-circle { width: 80px; height: 80px; border-radius: 50%; font-size: 16px; background: rgba(0,0,0,0.4); backdrop-filter: blur(8px); color: white; display: flex; justify-content: center; align-items: center; box-shadow: 0 4px 15px rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); }
+        
+        /* Interactive Play Button Colors */
+        .btn-play { width: 120px; height: 120px; font-size: 18px; font-weight: 700; line-height: 1.2; transition: background 0.3s ease; }
+        .is-break-override { background: #f59e0b !important; } /* Orange */
+        .is-work-override { background: #ef4444 !important; } /* Red */
+        .is-planned-work { background: var(--break-accent) !important; } /* Green */
+        .is-planned-break { background: var(--work-accent) !important; } /* Blue */
+
+        .sound-toggle { display: flex; justify-content: center; align-items: center; gap: 8px; color: rgba(255,255,255,0.9); font-size: 14px; background: rgba(0,0,0,0.4); padding: 8px 16px; border-radius: 20px; backdrop-filter: blur(8px); }
+        .hidden { display: none !important; }
+
+        /* Stats Modal */
+        #stats-modal {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.8); z-index: 200;
+            display: flex; justify-content: center; align-items: center;
+        }
+        .stats-card {
+            background: var(--glass-bg); padding: 32px; border-radius: 16px;
+            border: 1px solid var(--glass-border); width: 90%; max-width: 450px;
+            text-align: center;
+        }
+        .stats-textarea {
+            width: 100%; height: 140px; background: rgba(0,0,0,0.4); color: white;
+            border: 1px solid var(--glass-border); border-radius: 8px; padding: 12px;
+            font-family: monospace; font-size: 14px; resize: none; margin: 16px 0;
+            outline: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="bg-layer"></div>
+    
+    <div id="app">
+        <div class="glass-panel" id="builder-view">
+            <h1 style="text-align: center; margin-bottom: 20px; font-size: 24px;">Timer Configuration</h1>
+            
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 16px; flex-wrap: wrap; gap: 10px;">
+                <div class="input-row" style="margin-bottom: 0;">
+                    <label style="margin-right: 10px;">Total Timeline Limit</label>
+                    <div style="display:flex; gap: 4px; align-items:center;">
+                        <input type="number" id="setup-hours" value="2" min="0" class="base-input" style="width: 50px; text-align: right;"> h
+                        <input type="number" id="setup-mins" value="0" min="0" max="59" class="base-input" style="width: 50px; text-align: right;"> m
+                    </div>
+                </div>
+                <div class="input-row" style="margin-bottom: 0;">
+                    <label style="margin-right: 10px;" title="What happens when you interrupt your schedule?">Unplanned Break Mode</label>
+                    <select id="setup-break-mode" class="base-input">
+                        <option value="replace">Replace Current Work</option>
+                        <option value="consume">Eat Future Breaks</option>
+                    </select>
+                </div>
+            </div>
+
+            <div id="builder-timeline-slot">
+                <div id="timeline-wrapper">
+                    <div id="timeline-container">
+                        <div id="timeline-blocks"></div>
+                        <div id="timeline-progress" class="hidden"></div>
+                    </div>
+                    <div id="timeline-labels"></div>
+                </div>
+            </div>
+
+            <div class="procedural-card" id="add-controls">
+                <div class="tabs">
+                    <button id="tab-single" class="tab-btn active">Add Single</button>
+                    <button id="tab-multi" class="tab-btn">Add Sequence</button>
+                </div>
+                
+                <div id="pane-single" style="display:flex; gap:10px; align-items:center;">
+                    <select id="single-type" class="base-input" style="flex:1;">
+                        <option value="work">Work</option>
+                        <option value="break">Break</option>
+                    </select>
+                    <input type="number" id="single-dur" value="10" min="1" class="base-input" style="width:70px; text-align:right;">
+                    <span style="font-size:14px;">m</span>
+                    <button id="btn-add-single" style="padding:8px 16px; background:var(--work-accent); color:white;">Add</button>
+                </div>
+
+                <div id="pane-multi" class="hidden" style="display:flex; flex-direction:column; gap:10px;">
+                    <div style="display:flex; gap:10px;">
+                        <div class="input-row" style="flex:1;"><label>Work (m)</label> <input type="number" id="multi-work" value="50" min="1" class="base-input" style="width:100%;"></div>
+                        <div class="input-row" style="flex:1;"><label>Break (m)</label> <input type="number" id="multi-break" value="10" min="1" class="base-input" style="width:100%;"></div>
+                        <div class="input-row" style="flex:1;"><label>Repeats (x)</label> <input type="number" id="multi-count" value="4" min="1" class="base-input" style="width:100%;"></div>
+                    </div>
+                    <button id="btn-add-multi" class="btn-full" style="margin-top:0;">Add Sequence</button>
+                </div>
+            </div>
+
+            <div class="procedural-card hidden" id="edit-controls" style="border:1px solid rgba(255,255,255,0.2);">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px;">
+                    <h3 style="margin:0; font-size:14px;">Edit Selected (<span id="edit-count">0</span>)</h3>
+                    <button id="btn-edit-deselect" style="padding:4px 8px; font-size:12px; background:transparent; color:var(--text-dim); border:1px solid var(--text-dim);">Deselect</button>
+                </div>
+                
+                <div id="edit-single-pane" style="display:flex; gap:8px; margin-bottom: 12px; align-items:center;">
+                    <input type="text" id="edit-name" placeholder="Name" class="base-input" style="flex:1; width:80px;">
+                    <input type="number" id="edit-dur" min="1" class="base-input" style="width:60px;">
+                    <button id="btn-edit-toggle-type" style="padding:8px; background:rgba(255,255,255,0.1); color:white; border-radius:6px;" title="Swap Type">🔁</button>
+                    <button id="btn-edit-move-left" style="padding:8px; background:rgba(255,255,255,0.1); color:white; border-radius:6px;">&lt;</button>
+                    <button id="btn-edit-move-right" style="padding:8px; background:rgba(255,255,255,0.1); color:white; border-radius:6px;">&gt;</button>
+                </div>
+
+                <button id="btn-edit-delete" class="btn-full danger" style="margin-top:0; padding:10px;">Delete Selected</button>
+            </div>
+
+            <div class="main-actions">
+                <button class="btn-start" id="btn-start">Start Timer</button>
+                <button class="btn-link" id="btn-copy">Copy Link</button>
+            </div>
+        </div>
+
+        <div class="hidden" id="timer-view">
+            <div class="timer-header">
+                <div id="current-name">Work</div>
+                <div id="current-idx">Block 1/4</div>
+            </div>
+            
+            <div id="time-display">00:00</div>
+            
+            <div class="timer-controls">
+                <button class="btn-circle" id="btn-reset">Quit & Save</button>
+                <button class="btn-circle btn-play" id="btn-take-break">Action</button>
+            </div>
+
+            <div class="sound-toggle">
+                <input type="checkbox" id="chk-sound" checked>
+                <label for="chk-sound">Alert Sound</label>
+            </div>
+        </div>
+
+        <div id="stats-modal" class="hidden">
+            <div class="stats-card">
+                <h2 style="margin-bottom: 16px;">Session Stats</h2>
+                <textarea id="stats-text" class="stats-textarea" readonly></textarea>
+                <button class="btn-full" id="btn-close-stats" style="margin-top: 0;">Back to Setup</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const IMG_WORK = "url('https://images.unsplash.com/photo-1517336714731-489689fd1ca8?q=80&w=1920&auto=format&fit=crop')";
+        const IMG_BREAK = "url('https://images.unsplash.com/photo-1542273917363-3b1817f69a2d?q=80&w=1920&auto=format&fit=crop')";
+
+        // Setup State
+        let totalTime = 120;
+        let blocks = [];
+        let selectedIds = new Set();
+        let breakMode = 'replace';
+
+        // Execution State
+        let timerInterval = null;
+        let overallStartMs = 0;
+        let overallEndMs = 0;
+        let plannedIntervals = []; 
+        
+        let overrides = []; // { start, end, type: 'break'|'work', mode, isActive }
+        let currentOverride = null; // null | 'break' | 'work'
+        let lastBeepType = null;
+
+        // Elements
+        const builderView = document.getElementById('builder-view');
+        const timerView = document.getElementById('timer-view');
+        const bgLayer = document.getElementById('bg-layer');
+        const timelineWrapper = document.getElementById('timeline-wrapper');
+        const timelineBlocks = document.getElementById('timeline-blocks');
+        const timelineProgress = document.getElementById('timeline-progress');
+        const timelineLabels = document.getElementById('timeline-labels');
+        const timeDisplay = document.getElementById('time-display');
+        const btnTakeBreak = document.getElementById('btn-take-break');
+        const statsModal = document.getElementById('stats-modal');
+
+        // Init
+        loadState();
+        if(blocks.length === 0) {
+            for(let i=0; i<2; i++) { addTruncated('work', 50, 'Work'); addTruncated('break', 10, 'Break'); }
+            saveState();
+        }
+        renderTimelineSetup();
+        registerServiceWorker();
+
+        // --- Setup Logic ---
+        function updateTotalTimeFromInputs() {
+            let h = parseInt(document.getElementById('setup-hours').value) || 0;
+            let m = parseInt(document.getElementById('setup-mins').value) || 0;
+            totalTime = (h * 60) + m;
+            if (totalTime < 1) { totalTime = 1; document.getElementById('setup-mins').value = 1; }
+            
+            let sum = 0; let newBlocks = [];
+            for(let b of blocks) {
+                if (sum >= totalTime) break;
+                let allowed = Math.min(b.duration, totalTime - sum);
+                b.duration = allowed; newBlocks.push(b); sum += allowed;
+            }
+            blocks = newBlocks;
+            renderTimelineSetup(); saveState();
+        }
+        document.getElementById('setup-hours').onchange = updateTotalTimeFromInputs;
+        document.getElementById('setup-mins').onchange = updateTotalTimeFromInputs;
+        document.getElementById('setup-break-mode').onchange = (e) => { breakMode = e.target.value; saveState(); };
+
+        document.getElementById('tab-single').onclick = () => {
+            document.getElementById('tab-single').classList.add('active'); document.getElementById('tab-multi').classList.remove('active');
+            document.getElementById('pane-single').classList.remove('hidden'); document.getElementById('pane-multi').classList.add('hidden');
+        };
+        document.getElementById('tab-multi').onclick = () => {
+            document.getElementById('tab-multi').classList.add('active'); document.getElementById('tab-single').classList.remove('active');
+            document.getElementById('pane-multi').classList.remove('hidden'); document.getElementById('pane-single').classList.add('hidden');
+        };
+
+        function addTruncated(type, dur, name) {
+            let sum = blocks.reduce((a,b)=>a+b.duration, 0);
+            if (sum >= totalTime) return false;
+            let allowed = Math.min(dur, totalTime - sum);
+            blocks.push({ id: Date.now()+Math.random(), type, duration: allowed, name });
+            return true;
+        }
+
+        document.getElementById('btn-add-single').onclick = () => {
+            const type = document.getElementById('single-type').value;
+            const dur = parseInt(document.getElementById('single-dur').value) || 10;
+            if(!addTruncated(type, dur, type === 'work' ? 'Work' : 'Break')) alert('Timeline is full! Increase Limit.');
+            renderTimelineSetup(); saveState();
+        };
+
+        document.getElementById('btn-add-multi').onclick = () => {
+            const wDur = parseInt(document.getElementById('multi-work').value) || 50;
+            const bDur = parseInt(document.getElementById('multi-break').value) || 10;
+            const count = parseInt(document.getElementById('multi-count').value) || 4;
+            let added = 0;
+            for(let i=0; i<count; i++) {
+                if(addTruncated('work', wDur, 'Work')) added++;
+                if(addTruncated('break', bDur, 'Break')) added++;
+            }
+            if(added === 0) alert('Timeline is full! Increase Limit.');
+            renderTimelineSetup(); saveState();
+        };
+
+        function renderTimelineSetup() {
+            let h = Math.floor(totalTime / 60); let m = totalTime % 60;
+            document.getElementById('setup-hours').value = h;
+            document.getElementById('setup-mins').value = m;
+            document.getElementById('setup-break-mode').value = breakMode;
+            
+            timelineBlocks.innerHTML = '';
+            blocks.forEach((b) => {
+                let perc = (b.duration / totalTime) * 100;
+                let div = document.createElement('div');
+                div.className = `tl-block ${b.type} ${selectedIds.has(b.id) ? 'selected' : ''}`;
+                div.style.width = `${perc}%`;
+                div.title = `${b.name} (${b.duration}m)`;
+                div.onclick = (e) => {
+                    if(e.shiftKey || e.ctrlKey || e.metaKey) {
+                        if(selectedIds.has(b.id)) selectedIds.delete(b.id); else selectedIds.add(b.id);
+                    } else {
+                        if(selectedIds.has(b.id) && selectedIds.size === 1) selectedIds.clear();
+                        else { selectedIds.clear(); selectedIds.add(b.id); }
+                    }
+                    renderTimelineSetup(); updateEditControls();
+                };
+                timelineBlocks.appendChild(div);
+            });
+            updateEditControls();
+            overallStartMs = Date.now(); overallEndMs = null; // force setup mode labels
+            renderTimeLabels(blocks);
+        }
+
+        function renderTimeLabels(intervalsList) {
+            let sMs = overallStartMs || Date.now();
+            let eMs = overallEndMs || (sMs + totalTime * 60000);
+            let totalDurMs = eMs - sMs;
+            if(totalDurMs <= 0) { timelineLabels.innerHTML = ''; return; }
+            
+            let html = '';
+            let lastPerc = -100;
+            let level = 0;
+            
+            let d0 = new Date(sMs);
+            html += `<div class="tl-tick" style="left: 0%"></div>`;
+            html += `<div class="tl-label" style="left: 0%; top: 6px; transform: translateX(0);">${d0.getHours().toString().padStart(2, '0')}:${d0.getMinutes().toString().padStart(2, '0')}</div>`;
+            lastPerc = 0;
+
+            intervalsList.forEach((b, i) => {
+                let blockEndMs = b.end || (sMs + intervalsList.slice(0, i+1).reduce((acc, x) => acc + x.duration * 60000, 0));
+                let perc = ((blockEndMs - sMs) / totalDurMs) * 100;
+                if (perc > 100) perc = 100;
+                if (perc <= 0) return;
+                
+                let date = new Date(blockEndMs);
+                let timeStr = `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
+                
+                if (perc - lastPerc < 8 && perc < 99) {
+                    level = (level + 1) % 2;
+                } else {
+                    level = 0;
+                }
+                lastPerc = perc;
+                let topOffset = 6 + (level * 14);
+                
+                html += `<div class="tl-tick" style="left: ${perc}%"></div>`;
+                html += `<div class="tl-label" style="left: ${perc}%; top: ${topOffset}px; ${perc >= 99.5 ? 'transform: translateX(-100%);' : ''}">${timeStr}</div>`;
+            });
+            timelineLabels.innerHTML = html;
+        }
+
+        function updateEditControls() {
+            const editCard = document.getElementById('edit-controls');
+            if(selectedIds.size === 0) { editCard.classList.add('hidden'); return; }
+            editCard.classList.remove('hidden'); document.getElementById('edit-count').innerText = selectedIds.size;
+            
+            const singlePane = document.getElementById('edit-single-pane');
+            if(selectedIds.size === 1) {
+                singlePane.classList.remove('hidden');
+                let b = blocks.find(x => x.id === Array.from(selectedIds)[0]);
+                document.getElementById('edit-name').value = b.name; document.getElementById('edit-dur').value = b.duration;
+            } else { singlePane.classList.add('hidden'); }
+        }
+
+        // Edit actions
+        document.getElementById('edit-name').onchange = (e) => {
+            let b = blocks.find(x => x.id === Array.from(selectedIds)[0]);
+            if(b) b.name = e.target.value; renderTimelineSetup(); saveState();
+        };
+        document.getElementById('edit-dur').onchange = (e) => {
+            let id = Array.from(selectedIds)[0]; let b = blocks.find(x => x.id === id);
+            let newDur = parseInt(e.target.value) || 1;
+            let sumOthers = blocks.reduce((a,x) => a + (x.id===id ? 0 : x.duration), 0);
+            b.duration = Math.min(newDur, totalTime - sumOthers); e.target.value = b.duration;
+            renderTimelineSetup(); saveState();
+        };
+        document.getElementById('btn-edit-toggle-type').onclick = () => {
+            let b = blocks.find(x => x.id === Array.from(selectedIds)[0]);
+            if(b) {
+                b.type = b.type === 'work' ? 'break' : 'work';
+                if(b.name === 'Work') b.name = 'Break'; else if(b.name === 'Break') b.name = 'Work';
+            }
+            renderTimelineSetup(); saveState();
+        };
+        document.getElementById('btn-edit-move-left').onclick = () => {
+            let id = Array.from(selectedIds)[0]; let idx = blocks.findIndex(x => x.id === id);
+            if(idx > 0) { let t = blocks[idx-1]; blocks[idx-1] = blocks[idx]; blocks[idx] = t; renderTimelineSetup(); saveState(); }
+        };
+        document.getElementById('btn-edit-move-right').onclick = () => {
+            let id = Array.from(selectedIds)[0]; let idx = blocks.findIndex(x => x.id === id);
+            if(idx < blocks.length - 1) { let t = blocks[idx+1]; blocks[idx+1] = blocks[idx]; blocks[idx] = t; renderTimelineSetup(); saveState(); }
+        };
+        document.getElementById('btn-edit-delete').onclick = () => {
+            blocks = blocks.filter(b => !selectedIds.has(b.id)); selectedIds.clear(); renderTimelineSetup(); saveState();
+        };
+        document.getElementById('btn-edit-deselect').onclick = () => { selectedIds.clear(); renderTimelineSetup(); };
+
+        function saveState() {
+            const data = JSON.stringify({ tt: totalTime, bm: breakMode, b: blocks.map(b => ({t: b.type[0], d: b.duration, n: b.name})) });
+            localStorage.setItem('interval-timer-v5', data);
+            window.history.replaceState(null, '', '#' + encodeURIComponent(data));
+        }
+
+        function loadState() {
+            try {
+                let raw = window.location.hash.length > 1 ? decodeURIComponent(window.location.hash.slice(1)) : localStorage.getItem('interval-timer-v5');
+                if(!raw) raw = localStorage.getItem('interval-timer-v4');
+                if(!raw) raw = localStorage.getItem('interval-timer-v3');
+                if(raw) {
+                    const parsed = JSON.parse(raw);
+                    if(parsed.tt) {
+                        totalTime = parsed.tt; breakMode = parsed.bm || 'replace';
+                        blocks = parsed.b.map(b => ({id: Date.now()+Math.random(), type: b.t === 'w' ? 'work' : 'break', duration: b.d, name: b.n}));
+                    }
+                }
+            } catch(e) { console.error(e); }
+        }
+        document.getElementById('btn-copy').onclick = () => { saveState(); navigator.clipboard.writeText(window.location.href).then(()=>alert('Copied!')); };
+
+
+        // --- Interval Overrides Math ---
+        function mergeAdjacent(intervals) {
+            if (intervals.length === 0) return [];
+            let merged = [intervals[0]];
+            for (let i = 1; i < intervals.length; i++) {
+                let last = merged[merged.length - 1]; let curr = intervals[i];
+                if (last.end === curr.start && last.type === curr.type && last.subType === curr.subType && last.name === curr.name) {
+                    last.end = curr.end;
+                } else { merged.push(curr); }
+            }
+            return merged;
+        }
+
+        function applyBreakOverride(current, ovStart, ovEnd, mode) {
+            let intersections = []; let newCurrent = [];
+            for (let b of current) {
+                if (b.type !== 'work' || b.end <= ovStart || b.start >= ovEnd) {
+                    newCurrent.push(b);
+                } else {
+                    let iStart = Math.max(b.start, ovStart); let iEnd = Math.min(b.end, ovEnd);
+                    intersections.push({start: iStart, end: iEnd});
+                    if (b.start < iStart) newCurrent.push({...b, end: iStart});
+                    newCurrent.push({start: iStart, end: iEnd, type: 'break', subType: 'unplanned-break', name: 'Unplanned Break'});
+                    if (b.end > iEnd) newCurrent.push({...b, start: iEnd});
+                }
+            }
+            newCurrent.sort((a,b) => a.start - b.start);
+            
+            if (mode === 'consume') {
+                for (let ix of intersections) {
+                    let D = ix.end - ix.start; if (D <= 0) continue;
+                    let futureBreaks = [];
+                    for (let b of newCurrent) {
+                        if (b.type === 'break' && b.subType !== 'unplanned-break' && b.end > ix.end) {
+                            let s = Math.max(b.start, ix.end);
+                            futureBreaks.push({block: b, s: s, e: b.end, dur: b.end - s, eaten: 0});
+                        }
+                    }
+                    
+                    let remainingD = D;
+                    while (remainingD > 0 && futureBreaks.length > 0) {
+                        futureBreaks.sort((a,b) => b.dur - a.dur);
+                        if (futureBreaks[0].dur <= 0) break;
+                        let largest = futureBreaks[0];
+                        let secondLargestDur = futureBreaks.length > 1 ? futureBreaks[1].dur : 0;
+                        let amountToEat = Math.min(remainingD, largest.dur - secondLargestDur);
+                        if (amountToEat <= 0) amountToEat = Math.min(remainingD, largest.dur);
+                        if (amountToEat <= 0) amountToEat = Math.min(remainingD, 1000);
+                        
+                        largest.dur -= amountToEat; remainingD -= amountToEat; largest.eaten += amountToEat;
+                    }
+                    
+                    let nextCurrent = [];
+                    for (let b of newCurrent) {
+                        let fb = futureBreaks.find(x => x.block === b);
+                        if (fb && fb.eaten > 0) {
+                            let eatStart = fb.s; let eatEnd = fb.s + fb.eaten;
+                            if (b.start < eatStart) nextCurrent.push({...b, end: eatStart});
+                            nextCurrent.push({start: eatStart, end: eatEnd, type: 'work', subType: 'makeup-work', name: 'Makeup Work'});
+                            if (b.end > eatEnd) nextCurrent.push({...b, start: eatEnd});
+                        } else { nextCurrent.push(b); }
+                    }
+                    newCurrent = nextCurrent; newCurrent.sort((a,b) => a.start - b.start);
+                }
+            }
+            return mergeAdjacent(newCurrent);
+        }
+
+        function applyWorkOverride(current, ovStart, ovEnd) {
+            let intersections = []; let newCurrent = [];
+            for (let b of current) {
+                if (b.type !== 'break' || b.end <= ovStart || b.start >= ovEnd) {
+                    newCurrent.push(b);
+                } else {
+                    let iStart = Math.max(b.start, ovStart); let iEnd = Math.min(b.end, ovEnd);
+                    intersections.push({start: iStart, end: iEnd});
+                    if (b.start < iStart) newCurrent.push({...b, end: iStart});
+                    newCurrent.push({start: iStart, end: iEnd, type: 'work', subType: 'unplanned-work', name: 'Unplanned Work'});
+                    if (b.end > iEnd) newCurrent.push({...b, start: iEnd});
+                }
+            }
+            newCurrent.sort((a,b) => a.start - b.start);
+            
+            for (let ix of intersections) {
+                let D = ix.end - ix.start; if (D <= 0) continue;
+                let remainingD = D; let nextCurrent = [];
+                for (let b of newCurrent) {
+                    if (remainingD > 0 && b.type === 'work' && b.subType !== 'unplanned-work' && b.end > ix.end) {
+                        let s = Math.max(b.start, ix.end); let available = b.end - s; let convert = Math.min(remainingD, available);
+                        if (b.start < s) nextCurrent.push({...b, end: s});
+                        nextCurrent.push({start: s, end: s + convert, type: 'break', subType: 'bonus-break', name: 'Bonus Break'});
+                        if (b.end > s + convert) nextCurrent.push({...b, start: s + convert});
+                        remainingD -= convert;
+                    } else { nextCurrent.push(b); }
+                }
+                newCurrent = nextCurrent;
+            }
+            return mergeAdjacent(newCurrent);
+        }
+
+        function getCurrentIntervals() {
+            let current = JSON.parse(JSON.stringify(plannedIntervals));
+            let now = Date.now();
+            for (let ov of overrides) {
+                let uEnd = ov.isActive ? now : ov.end;
+                if (uEnd <= ov.start) continue;
+                if (ov.type === 'break') current = applyBreakOverride(current, ov.start, uEnd, ov.mode);
+                else if (ov.type === 'work') current = applyWorkOverride(current, ov.start, uEnd);
+            }
+            return current;
+        }
+
+        // --- Core Execution ---
+        document.getElementById('btn-start').onclick = startSequence;
+        document.getElementById('btn-take-break').onclick = toggleOverride;
+        document.getElementById('btn-reset').onclick = () => finishSequence(false);
+        document.getElementById('btn-close-stats').onclick = () => { statsModal.classList.add('hidden'); };
+
+        function startSequence() {
+            if(blocks.length === 0) return alert('Add blocks first!');
+            selectedIds.clear(); updateEditControls();
+            
+            builderView.classList.add('hidden'); timerView.classList.remove('hidden');
+            
+            overallStartMs = Date.now();
+            overallEndMs = overallStartMs + (totalTime * 60 * 1000);
+            plannedIntervals = []; let cur = overallStartMs;
+            for(let b of blocks) {
+                let durMs = b.duration * 60 * 1000;
+                plannedIntervals.push({ start: cur, end: cur + durMs, type: b.type, name: b.name });
+                cur += durMs;
+            }
+            
+            overrides = []; currentOverride = null; lastBeepType = null;
+            
+            document.body.appendChild(timelineWrapper);
+            timelineWrapper.classList.add('active-timer');
+            timelineProgress.classList.remove('hidden');
+            
+            clearInterval(timerInterval); timerInterval = setInterval(tick, 250); tick();
+        }
+
+        function toggleOverride() {
+            let active = getCurrentIntervals().find(x => x.start <= Date.now() && Date.now() < x.end);
+            if (!active) return;
+
+            if (currentOverride === null) {
+                if (active.type === 'work') {
+                    currentOverride = 'break';
+                    overrides.push({ start: Date.now(), type: 'break', mode: breakMode, isActive: true });
+                } else {
+                    currentOverride = 'work';
+                    overrides.push({ start: Date.now(), type: 'work', isActive: true });
+                }
+            } else {
+                let ov = overrides[overrides.length - 1];
+                ov.end = Date.now(); ov.isActive = false;
+                currentOverride = null;
+            }
+            tick();
+        }
+
+        function updatePlayButton(active) {
+            if (!active) return;
+            
+            if (currentOverride === 'break') {
+                btnTakeBreak.innerHTML = 'Resume<br>Work';
+                btnTakeBreak.className = 'btn-circle btn-play is-break-override';
+            } else if (currentOverride === 'work') {
+                btnTakeBreak.innerHTML = 'Stop<br>Working';
+                btnTakeBreak.className = 'btn-circle btn-play is-work-override';
+            } else {
+                if (active.type === 'work') {
+                    btnTakeBreak.innerHTML = 'Take<br>Break';
+                    btnTakeBreak.className = 'btn-circle btn-play is-planned-work';
+                } else {
+                    btnTakeBreak.innerHTML = 'Start<br>Working';
+                    btnTakeBreak.className = 'btn-circle btn-play is-planned-break';
+                }
+            }
+        }
+
+        function tick() {
+            let now = Date.now();
+            if (now >= overallEndMs) return finishSequence(true);
+            
+            let currentIntervals = getCurrentIntervals();
+            renderTimelineExecution(currentIntervals);
+            renderTimeLabels(currentIntervals);
+            
+            timelineProgress.style.width = `${((now - overallStartMs) / (overallEndMs - overallStartMs)) * 100}%`;
+
+            let active = currentIntervals.find(x => x.start <= now && now < x.end);
+            if (!active && currentIntervals.length > 0) active = currentIntervals[currentIntervals.length-1];
+            
+            if (active) {
+                if ((active.subType === 'unplanned-break' || active.subType === 'unplanned-work') && currentOverride !== null) {
+                    timeDisplay.innerText = "+" + formatTime(now - active.start);
+                } else {
+                    timeDisplay.innerText = formatTime(active.end - now);
+                }
+
+                document.getElementById('current-name').innerText = active.name;
+                
+                let color = '';
+                if(active.subType === 'unplanned-break') color = '#f43f5e';
+                else if(active.subType === 'makeup-work') color = '#f59e0b';
+                else if(active.subType === 'unplanned-work') color = '#8b5cf6';
+                else if(active.subType === 'bonus-break') color = '#0ea5e9';
+                else color = active.type === 'work' ? '#93c5fd' : '#6ee7b7';
+                
+                document.getElementById('current-name').style.color = color;
+                
+                if (currentOverride === 'break' && active.type === 'break' && active.subType !== 'unplanned-break') {
+                    document.getElementById('current-idx').innerText = `On Planned Break (Unplanned Break Paused)`;
+                } else if (currentOverride === 'work' && active.type === 'work' && active.subType !== 'unplanned-work') {
+                    document.getElementById('current-idx').innerText = `On Planned Work (Unplanned Work Paused)`;
+                } else {
+                    document.getElementById('current-idx').innerText = `Active Block`;
+                }
+
+                bgLayer.style.backgroundImage = active.type === 'work' ? IMG_WORK : IMG_BREAK;
+                
+                if (lastBeepType !== null && lastBeepType !== active.type) playBeep();
+                lastBeepType = active.type;
+            }
+            updatePlayButton(active);
+        }
+
+        function renderTimelineExecution(intervals) {
+            let html = '';
+            let totalMs = overallEndMs - overallStartMs;
+            for(let inv of intervals) {
+                if(inv.start >= overallEndMs || inv.end <= overallStartMs) continue;
+                let s = Math.max(overallStartMs, inv.start); let e = Math.min(overallEndMs, inv.end);
+                let perc = ((e - s) / totalMs) * 100;
+                if (perc <= 0) continue;
+                let className = inv.subType ? inv.subType : (inv.type === 'work' ? 'work' : 'break');
+                html += `<div class="tl-block ${className}" style="width: ${perc}%" title="${inv.name}"></div>`;
+            }
+            timelineBlocks.innerHTML = html;
+        }
+
+        function finishSequence(isNatural = false) {
+            clearInterval(timerInterval);
+            if(currentOverride !== null) {
+                overrides[overrides.length - 1].end = Date.now();
+                overrides[overrides.length - 1].isActive = false;
+                currentOverride = null;
+            }
+            if(isNatural) { playBeep(true); timelineProgress.style.width = '100%'; }
+            
+            let finalIntervals = getCurrentIntervals();
+            let limitMs = Math.min(Date.now(), overallEndMs);
+            let actualPassedMs = limitMs - overallStartMs;
+            
+            let workMs = 0; let breakMs = 0;
+            let unpBreakMs = 0; let unpWorkMs = 0;
+            
+            for (let inv of finalIntervals) {
+                let s = Math.max(overallStartMs, inv.start); let e = Math.min(limitMs, inv.end);
+                if (s < e) { 
+                    if(inv.type === 'work') {
+                        workMs += (e-s);
+                        if (inv.subType === 'unplanned-work') unpWorkMs += (e-s);
+                    } else {
+                        breakMs += (e-s);
+                        if (inv.subType === 'unplanned-break') unpBreakMs += (e-s);
+                    }
+                }
+            }
+
+            const statsStr = 
+`--- SESSION STATS ---
+Date: ${new Date().toLocaleDateString()}
+Total Elapsed: ${formatLong(actualPassedMs)}
+
+Work Time:  ${formatLong(workMs)} (incl. ${formatLong(unpWorkMs)} unplanned)
+Break Time: ${formatLong(breakMs)} (incl. ${formatLong(unpBreakMs)} unplanned)
+---------------------`;
+            
+            document.getElementById('stats-text').value = statsStr;
+            statsModal.classList.remove('hidden');
+
+            timerView.classList.add('hidden'); builderView.classList.remove('hidden');
+            document.getElementById('builder-timeline-slot').appendChild(timelineWrapper);
+            timelineWrapper.classList.remove('active-timer');
+            timelineProgress.classList.add('hidden'); timelineProgress.style.width = '0%';
+            bgLayer.style.backgroundImage = 'none';
+            
+            renderTimelineSetup(); // reset UI
+        }
+
+        function formatTime(ms) {
+            if (ms < 0) ms = 0;
+            const totalSec = Math.ceil(ms / 1000);
+            const m = Math.floor(totalSec / 60); const s = totalSec % 60;
+            if (m > 59) return `${Math.floor(m/60)}h ${(m%60).toString().padStart(2,'0')}m`;
+            return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+        }
+        
+        function formatLong(ms) {
+            let totalSec = Math.floor(ms / 1000);
+            let h = Math.floor(totalSec / 3600);
+            let m = Math.floor((totalSec % 3600) / 60);
+            let s = totalSec % 60;
+            if (h > 0) return `${h}h ${m}m ${s}s`;
+            return `${m}m ${s}s`;
+        }
+
+        function playBeep(isFinal = false) {
+            if(!document.getElementById('chk-sound').checked) return;
+            try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = ctx.createOscillator(); const gain = ctx.createGain();
+                osc.connect(gain); gain.connect(ctx.destination);
+                osc.type = 'sine'; osc.frequency.setValueAtTime(isFinal ? 440 : 880, ctx.currentTime);
+                gain.gain.setValueAtTime(1, ctx.currentTime); gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + (isFinal ? 1.0 : 0.5));
+                osc.start(ctx.currentTime); osc.stop(ctx.currentTime + (isFinal ? 1.0 : 0.5));
+            } catch(e) {}
+        }
+        function registerServiceWorker() {
+            if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(e=>console.log(e)));
+        }
+    </script>
+</body>
+</html>
