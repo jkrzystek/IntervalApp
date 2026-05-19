@@ -476,6 +476,7 @@
             blocks = blocks.filter(b => !selectedIds.has(b.id)); selectedIds.clear(); renderTimelineSetup(); saveState();
         };
         document.getElementById('btn-edit-deselect').onclick = () => { selectedIds.clear(); renderTimelineSetup(); };
+        document.getElementById('btn-clear-all').onclick = () => { blocks = []; selectedIds.clear(); renderTimelineSetup(); saveState(); };
 
         function saveState() {
             const data = JSON.stringify({ tt: totalTime, bm: breakMode, b: blocks.map(b => ({t: b.type[0], d: b.duration, n: b.name})) });
