@@ -232,6 +232,13 @@
                 <button id="btn-edit-delete" class="btn-full danger" style="margin-top:0; padding:10px;">Delete Selected</button>
             </div>
 
+            <div style="display:flex; align-items:center; gap:8px; margin-top: auto; margin-bottom: 10px; flex-wrap: wrap;">
+                <label style="font-size: 14px; white-space: nowrap;">Session Log:</label>
+                <button id="btn-csv-open" style="padding:8px 12px; background:rgba(255,255,255,0.1); color:white; border:1px solid var(--glass-border); font-size: 13px;">Open CSV</button>
+                <button id="btn-csv-new" style="padding:8px 12px; background:rgba(255,255,255,0.1); color:white; border:1px solid var(--glass-border); font-size: 13px;">New CSV</button>
+                <span id="csv-file-name" style="font-size: 13px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px;">No file selected</span>
+            </div>
+
             <div class="main-actions">
                 <button class="btn-start" id="btn-start">Start Timer</button>
                 <button class="btn-link" id="btn-copy">Copy Link</button>
@@ -285,6 +292,8 @@
         let overrides = []; // { start, end, type: 'break'|'work', mode, isActive }
         let currentOverride = null; // null | 'break' | 'work'
         let lastBeepType = null;
+        let csvFileHandle = null;
+        const CSV_HEADER = 'Date,Start Time,End Time,Total (min),Work (min),Break (min),Unplanned Break (min),Unplanned Work (min)';
 
         // Elements
         const builderView = document.getElementById('builder-view');
@@ -601,11 +610,11 @@
             return mergeAdjacent(newCurrent);
         }
 
-        function getCurrentIntervals() {
+        function getCurrentIntervals(asOfNow) {
             let current = JSON.parse(JSON.stringify(plannedIntervals));
-            let now = Date.now();
+            let now = asOfNow !== undefined ? asOfNow : Date.now();
             for (let ov of overrides) {
-                let uEnd = ov.isActive ? now : ov.end;
+                let uEnd = ov.isActive ? (now + 1) : ov.end;
                 if (uEnd <= ov.start) continue;
                 if (ov.type === 'break') current = applyBreakOverride(current, ov.start, uEnd, ov.mode);
                 else if (ov.type === 'work') current = applyWorkOverride(current, ov.start, uEnd);
@@ -644,20 +653,21 @@
         }
 
         function toggleOverride() {
-            let active = getCurrentIntervals().find(x => x.start <= Date.now() && Date.now() < x.end);
+            let now = Date.now();
+            let active = getCurrentIntervals(now).find(x => x.start <= now && now < x.end);
             if (!active) return;
 
             if (currentOverride === null) {
                 if (active.type === 'work') {
                     currentOverride = 'break';
-                    overrides.push({ start: Date.now(), type: 'break', mode: breakMode, isActive: true });
+                    overrides.push({ start: now, type: 'break', mode: breakMode, isActive: true });
                 } else {
                     currentOverride = 'work';
-                    overrides.push({ start: Date.now(), type: 'work', isActive: true });
+                    overrides.push({ start: now, type: 'work', isActive: true });
                 }
             } else {
                 let ov = overrides[overrides.length - 1];
-                ov.end = Date.now(); ov.isActive = false;
+                ov.end = now; ov.isActive = false;
                 currentOverride = null;
             }
             tick();
@@ -687,7 +697,7 @@
             let now = Date.now();
             if (now >= overallEndMs) return finishSequence(true);
             
-            let currentIntervals = getCurrentIntervals();
+            let currentIntervals = getCurrentIntervals(now);
             renderTimelineExecution(currentIntervals);
             renderTimeLabels(currentIntervals);
             
@@ -773,15 +783,31 @@
                 }
             }
 
-            const statsStr = 
+            const sessionDate = new Date(overallStartMs);
+            const endDate = new Date(limitMs);
+            const fmtTime = d => `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
+            const toMin = ms => (ms / 60000).toFixed(1);
+
+            const statsStr =
 `--- SESSION STATS ---
-Date: ${new Date().toLocaleDateString()}
+Date: ${sessionDate.toLocaleDateString()}
 Total Elapsed: ${formatLong(actualPassedMs)}
 
 Work Time:  ${formatLong(workMs)} (incl. ${formatLong(unpWorkMs)} unplanned)
 Break Time: ${formatLong(breakMs)} (incl. ${formatLong(unpBreakMs)} unplanned)
 ---------------------`;
-            
+
+            appendSessionToCsv({
+                date: sessionDate.toLocaleDateString(),
+                startTime: fmtTime(sessionDate),
+                endTime: fmtTime(endDate),
+                duration: toMin(actualPassedMs),
+                work: toMin(workMs),
+                breakTime: toMin(breakMs),
+                unpBreak: toMin(unpBreakMs),
+                unpWork: toMin(unpWorkMs),
+            });
+
             document.getElementById('stats-text').value = statsStr;
             statsModal.classList.remove('hidden');
 
@@ -822,6 +848,54 @@ Break Time: ${formatLong(breakMs)} (incl. ${formatLong(unpBreakMs)} unplanned)
                 osc.start(ctx.currentTime); osc.stop(ctx.currentTime + (isFinal ? 1.0 : 0.5));
             } catch(e) {}
         }
+        // CSV Session Logging
+        async function pickCsvFile(createNew) {
+            if (!('showOpenFilePicker' in window)) {
+                alert('File picker not supported. Use Chrome or Edge.');
+                return;
+            }
+            try {
+                if (createNew) {
+                    csvFileHandle = await window.showSaveFilePicker({
+                        suggestedName: 'interval-sessions.csv',
+                        types: [{ description: 'CSV Files', accept: { 'text/csv': ['.csv'] } }],
+                    });
+                    const writable = await csvFileHandle.createWritable();
+                    await writable.write(CSV_HEADER + '\n');
+                    await writable.close();
+                } else {
+                    const [handle] = await window.showOpenFilePicker({
+                        types: [{ description: 'CSV Files', accept: { 'text/csv': ['.csv'] } }],
+                        multiple: false,
+                    });
+                    csvFileHandle = handle;
+                }
+                document.getElementById('csv-file-name').textContent = csvFileHandle.name;
+            } catch (e) {
+                if (e.name !== 'AbortError') console.error(e);
+            }
+        }
+
+        document.getElementById('btn-csv-open').onclick = () => pickCsvFile(false);
+        document.getElementById('btn-csv-new').onclick = () => pickCsvFile(true);
+
+        async function appendSessionToCsv(stats) {
+            if (!csvFileHandle) return;
+            try {
+                const file = await csvFileHandle.getFile();
+                let text = await file.text();
+                if (!text.trim()) text = CSV_HEADER + '\n';
+                const row = [stats.date, stats.startTime, stats.endTime, stats.duration, stats.work, stats.breakTime, stats.unpBreak, stats.unpWork].join(',');
+                text += row + '\n';
+                const writable = await csvFileHandle.createWritable();
+                await writable.write(text);
+                await writable.close();
+            } catch (e) {
+                console.error('CSV save failed:', e);
+                alert('Failed to save session to CSV. You may need to re-select the file.');
+            }
+        }
+
         function registerServiceWorker() {
             if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(e=>console.log(e)));
         }
